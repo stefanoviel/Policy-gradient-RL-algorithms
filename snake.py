@@ -48,6 +48,7 @@ class SnakeEnv(gym.Env):
 
         self.window = None
         self.clock = None
+        self.render_fps = self.metadata["render_fps"]
 
     def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None):
         super().reset(seed=seed)
@@ -120,11 +121,17 @@ class SnakeEnv(gym.Env):
             self.window = pygame.display.set_mode((width, height))
             pygame.display.set_caption("Snake RL Environment")
             self.clock = pygame.time.Clock()
+            self.render_fps = self.metadata["render_fps"]
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.close()
                 raise SystemExit
+            if event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_KP_PLUS):
+                    self.render_fps = min(self.render_fps + 5, 60)
+                if event.key in (pygame.K_MINUS, pygame.K_UNDERSCORE, pygame.K_KP_MINUS):
+                    self.render_fps = max(self.render_fps - 5, 5)
 
         self.window.fill((30, 30, 30))
 
@@ -133,7 +140,7 @@ class SnakeEnv(gym.Env):
         self._draw_block(self.food, (200, 50, 50))
 
         pygame.display.flip()
-        self.clock.tick(self.metadata["render_fps"])
+        self.clock.tick(self.render_fps)
 
     def close(self):
         if self.window is not None:
