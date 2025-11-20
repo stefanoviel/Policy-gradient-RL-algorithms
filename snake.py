@@ -1,128 +1,204 @@
 import random
-import sys
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
-import pygame
+import numpy as np
 
+try:
+    import gymnasium as gym
+    from gymnasium import spaces
+except ImportError:  # pragma: no cover - fallback for classic gym installs
+    import gym
+    from gym import spaces
 
-CELL_SIZE = 20
-GRID_WIDTH = 32
-GRID_HEIGHT = 24
-SCREEN_WIDTH = CELL_SIZE * GRID_WIDTH
-SCREEN_HEIGHT = CELL_SIZE * GRID_HEIGHT
-SNAKE_SPEED = 10
-MIN_SPEED = 5
-MAX_SPEED = 30
+try:
+    import pygame
+except ImportError:  # pragma: no cover - pygame is optional for rendering
+    pygame = None
 
-BACKGROUND = (30, 30, 30)
-SNAKE_COLOR = (0, 200, 0)
-FOOD_COLOR = (200, 50, 50)
-TEXT_COLOR = (220, 220, 220)
 
 Vector = Tuple[int, int]
 
 
-def random_food_position(snake: List[Vector]) -> Vector:
-    """Return a random grid coordinate not currently occupied by the snake."""
-    while True:
-        position = (random.randint(0, GRID_WIDTH - 1), random.randint(0, GRID_HEIGHT - 1))
-        if position not in snake:
-            return position
+class SnakeEnv(gym.Env):
+    """Gym-style environment for the classic Snake game with a vector state space."""
 
+    metadata = {"render_modes": ["human"], "render_fps": 15}
 
-def draw_block(surface: pygame.Surface, color: Tuple[int, int, int], position: Vector) -> None:
-    rect = pygame.Rect(position[0] * CELL_SIZE, position[1] * CELL_SIZE, CELL_SIZE, CELL_SIZE)
-    pygame.draw.rect(surface, color, rect)
+    RIGHT: Vector = (1, 0)
+    DOWN: Vector = (0, 1)
+    LEFT: Vector = (-1, 0)
+    UP: Vector = (0, -1)
+    DIRECTIONS = [RIGHT, DOWN, LEFT, UP]
 
+    def __init__(self, grid_width: int = 20, grid_height: int = 20, render_mode: Optional[str] = None) -> None:
+        super().__init__()
+        self.grid_width = grid_width
+        self.grid_height = grid_height
+        self.render_mode = render_mode
+        self.cell_size = 20
 
-def main() -> None:
-    pygame.init()
-    screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-    pygame.display.set_caption("Snake")
-    clock = pygame.time.Clock()
-    font = pygame.font.SysFont("Arial", 22)
+        self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(11,), dtype=np.float32)
+        self.action_space = spaces.Discrete(3)  # straight, right turn, left turn
 
-    def reset_game():
-        direction = (1, 0)
-        head_x = GRID_WIDTH // 2
-        head_y = GRID_HEIGHT // 2
-        snake = [(head_x - i, head_y) for i in range(3)]
-        food = random_food_position(snake)
-        return snake, direction, direction, food, 0
+        self.snake: List[Vector] = []
+        self.direction: Vector = self.RIGHT
+        self.food: Vector = (0, 0)
+        self.score = 0
+        self.steps_since_food = 0
 
-    snake, direction, pending_direction, food, score = reset_game()
-    speed = SNAKE_SPEED
-    game_over = False
+        self.window = None
+        self.clock = None
 
-    while True:
+    def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None):
+        super().reset(seed=seed)
+        if seed is not None:
+            random.seed(seed)
+            np.random.seed(seed)
+
+        center_x = self.grid_width // 2
+        center_y = self.grid_height // 2
+        self.direction = self.RIGHT
+        self.snake = [(center_x, center_y), (center_x - 1, center_y), (center_x - 2, center_y)]
+        self.food = self._place_food()
+        self.score = 0
+        self.steps_since_food = 0
+
+        observation = self._get_state()
+        info = {"score": self.score}
+        return observation, info
+
+    def step(self, action: int):
+        action = int(action)
+        assert self.action_space.contains(action), "Action must be 0 (straight), 1 (right), or 2 (left)"
+
+        self.direction = self._direction_after_action(action)
+        new_head = (self.snake[0][0] + self.direction[0], self.snake[0][1] + self.direction[1])
+
+        reward = 0.0
+        terminated = False
+
+        if self._is_collision(new_head):
+            reward = -10.0
+            terminated = True
+        else:
+            self.snake.insert(0, new_head)
+            if new_head == self.food:
+                reward = 10.0
+                self.score += 1
+                self.food = self._place_food()
+                self.steps_since_food = 0
+            else:
+                self.snake.pop()
+                self.steps_since_food += 1
+
+        observation = self._get_state()
+        info = {"score": self.score}
+        truncated = False
+
+        return observation, reward, terminated, truncated, info
+
+    def render(self):
+        if self.render_mode != "human":
+            return
+        if pygame is None:
+            raise RuntimeError("pygame is required for rendering but is not installed.")
+
+        if self.window is None:
+            pygame.init()
+            width = self.grid_width * self.cell_size
+            height = self.grid_height * self.cell_size
+            self.window = pygame.display.set_mode((width, height))
+            pygame.display.set_caption("Snake RL Environment")
+            self.clock = pygame.time.Clock()
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
-            if event.type == pygame.KEYDOWN:
-                if event.key in (pygame.K_ESCAPE, pygame.K_q):
-                    pygame.quit()
-                    sys.exit()
+                self.close()
+                raise SystemExit
 
-                key_to_direction = {
-                    pygame.K_w: (0, -1),
-                    pygame.K_UP: (0, -1),
-                    pygame.K_s: (0, 1),
-                    pygame.K_DOWN: (0, 1),
-                    pygame.K_a: (-1, 0),
-                    pygame.K_LEFT: (-1, 0),
-                    pygame.K_d: (1, 0),
-                    pygame.K_RIGHT: (1, 0),
-                }
+        self.window.fill((30, 30, 30))
 
-                if event.key in key_to_direction and not game_over:
-                    new_direction = key_to_direction[event.key]
-                    if (new_direction[0] != -direction[0]) or (new_direction[1] != -direction[1]):
-                        pending_direction = new_direction
-
-                if event.key == pygame.K_r and game_over:
-                    snake, direction, pending_direction, food, score = reset_game()
-                    speed = SNAKE_SPEED
-                    game_over = False
-
-                if event.key in (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_KP_PLUS):
-                    speed = min(MAX_SPEED, speed + 1)
-
-                if event.key in (pygame.K_MINUS, pygame.K_UNDERSCORE, pygame.K_KP_MINUS):
-                    speed = max(MIN_SPEED, speed - 1)
-
-        if not game_over:
-            direction = pending_direction
-            new_head = (snake[0][0] + direction[0], snake[0][1] + direction[1])
-            snake.insert(0, new_head)
-
-            hit_wall = not (0 <= new_head[0] < GRID_WIDTH and 0 <= new_head[1] < GRID_HEIGHT)
-            hit_self = new_head in snake[1:]
-            if hit_wall or hit_self:
-                game_over = True
-            else:
-                if new_head == food:
-                    score += 1
-                    food = random_food_position(snake)
-                else:
-                    snake.pop()
-
-        screen.fill(BACKGROUND)
-        for segment in snake:
-            draw_block(screen, SNAKE_COLOR, segment)
-        draw_block(screen, FOOD_COLOR, food)
-
-        score_surface = font.render(f"Score: {score}", True, TEXT_COLOR)
-        screen.blit(score_surface, (10, 10))
-
-        if game_over:
-            text = font.render("Game over! Press R to restart.", True, TEXT_COLOR)
-            text_rect = text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
-            screen.blit(text, text_rect)
+        for segment in self.snake:
+            self._draw_block(segment, (0, 200, 0))
+        self._draw_block(self.food, (200, 50, 50))
 
         pygame.display.flip()
-        clock.tick(speed)
+        self.clock.tick(self.metadata["render_fps"])
+
+    def close(self):
+        if self.window is not None:
+            pygame.display.quit()
+            pygame.quit()
+            self.window = None
+            self.clock = None
+
+    def _direction_after_action(self, action: int) -> Vector:
+        idx = self.DIRECTIONS.index(self.direction)
+        if action == 1:  # right turn
+            idx = (idx + 1) % 4
+        elif action == 2:  # left turn
+            idx = (idx - 1) % 4
+        return self.DIRECTIONS[idx]
+
+    def _is_collision(self, point: Vector) -> bool:
+        x, y = point
+        out_of_bounds = x < 0 or x >= self.grid_width or y < 0 or y >= self.grid_height
+        hits_body = point in self.snake
+        return out_of_bounds or hits_body
+
+    def _place_food(self) -> Vector:
+        available = [(x, y) for x in range(self.grid_width) for y in range(self.grid_height) if (x, y) not in self.snake]
+        if not available:
+            raise RuntimeError("No space left to place food.")
+        return random.choice(available)
+
+    def _get_state(self) -> np.ndarray:
+        head_x, head_y = self.snake[0]
+        dir_idx = self.DIRECTIONS.index(self.direction)
+        dir_left = self.DIRECTIONS[(dir_idx - 1) % 4]
+        dir_right = self.DIRECTIONS[(dir_idx + 1) % 4]
+
+        danger_straight = self._is_collision((head_x + self.direction[0], head_y + self.direction[1]))
+        danger_right = self._is_collision((head_x + dir_right[0], head_y + dir_right[1]))
+        danger_left = self._is_collision((head_x + dir_left[0], head_y + dir_left[1]))
+
+        state = np.array(
+            [
+                float(danger_straight),
+                float(danger_right),
+                float(danger_left),
+                float(self.direction == self.LEFT),
+                float(self.direction == self.RIGHT),
+                float(self.direction == self.UP),
+                float(self.direction == self.DOWN),
+                float(self.food[0] < head_x),
+                float(self.food[0] > head_x),
+                float(self.food[1] < head_y),
+                float(self.food[1] > head_y),
+            ],
+            dtype=np.float32,
+        )
+        return state
+
+    def _draw_block(self, position: Vector, color: Tuple[int, int, int]) -> None:
+        if self.window is None or pygame is None:
+            return
+        rect = pygame.Rect(position[0] * self.cell_size, position[1] * self.cell_size, self.cell_size, self.cell_size)
+        pygame.draw.rect(self.window, color, rect)
 
 
 if __name__ == "__main__":
-    main()
+    env = SnakeEnv(render_mode="human")
+    obs, info = env.reset()
+    print("Starting demo. Close the window to stop.")
+    try:
+        while True:
+            action = env.action_space.sample()
+            obs, reward, terminated, truncated, info = env.step(action)
+            env.render()
+            if terminated or truncated:
+                obs, info = env.reset()
+    except SystemExit:
+        pass
+    finally:
+        env.close()
