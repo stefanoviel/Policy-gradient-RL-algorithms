@@ -48,7 +48,11 @@ class SnakeEnv(gym.Env):
 
         self.window = None
         self.clock = None
+        self.font = None
         self.render_fps = self.metadata["render_fps"]
+        self.display_fps = float(self.render_fps)
+        self.button_speed_up = None
+        self.button_speed_down = None
 
     def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None):
         super().reset(seed=seed)
@@ -65,7 +69,7 @@ class SnakeEnv(gym.Env):
         self.steps_since_food = 0
 
         observation = self._get_state()
-        info = {"score": self.score}
+        info = {"score": self.score, "length": len(self.snake)}
         return observation, info
 
     def step(self, action: int):
@@ -104,7 +108,7 @@ class SnakeEnv(gym.Env):
         reward -= 0.01
 
         observation = self._get_state()
-        info = {"score": self.score}
+        info = {"score": self.score, "length": len(self.snake)}
         truncated = False
 
         return observation, reward, terminated, truncated, info
@@ -121,7 +125,13 @@ class SnakeEnv(gym.Env):
             self.window = pygame.display.set_mode((width, height))
             pygame.display.set_caption("Snake RL Environment")
             self.clock = pygame.time.Clock()
+            self.font = pygame.font.SysFont("Arial", 18)
             self.render_fps = self.metadata["render_fps"]
+            self.display_fps = float(self.render_fps)
+            padding = 10
+            btn_w, btn_h = 70, 30
+            self.button_speed_up = pygame.Rect(padding, padding, btn_w, btn_h)
+            self.button_speed_down = pygame.Rect(padding + btn_w + 10, padding, btn_w, btn_h)
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -129,18 +139,26 @@ class SnakeEnv(gym.Env):
                 raise SystemExit
             if event.type == pygame.KEYDOWN:
                 if event.key in (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_KP_PLUS):
-                    self.render_fps = min(self.render_fps + 5, 60)
+                    self._increase_speed()
                 if event.key in (pygame.K_MINUS, pygame.K_UNDERSCORE, pygame.K_KP_MINUS):
-                    self.render_fps = max(self.render_fps - 5, 5)
+                    self._decrease_speed()
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if self.button_speed_up and self.button_speed_up.collidepoint(event.pos):
+                    self._increase_speed()
+                if self.button_speed_down and self.button_speed_down.collidepoint(event.pos):
+                    self._decrease_speed()
 
         self.window.fill((30, 30, 30))
 
         for segment in self.snake:
             self._draw_block(segment, (0, 200, 0))
         self._draw_block(self.food, (200, 50, 50))
+        self._draw_ui()
 
         pygame.display.flip()
-        self.clock.tick(self.render_fps)
+        delta_ms = self.clock.tick(self.render_fps)
+        if delta_ms > 0:
+            self.display_fps = 1000.0 / delta_ms
 
     def close(self):
         if self.window is not None:
@@ -202,6 +220,36 @@ class SnakeEnv(gym.Env):
             return
         rect = pygame.Rect(position[0] * self.cell_size, position[1] * self.cell_size, self.cell_size, self.cell_size)
         pygame.draw.rect(self.window, color, rect)
+
+    def _draw_ui(self) -> None:
+        if self.window is None or self.font is None or pygame is None:
+            return
+        button_color = (60, 60, 60)
+        text_color = (230, 230, 230)
+        highlight_color = (100, 100, 100)
+
+        if self.button_speed_up:
+            pygame.draw.rect(self.window, button_color, self.button_speed_up)
+            pygame.draw.rect(self.window, highlight_color, self.button_speed_up, 2)
+            plus_text = self.font.render("+ Speed", True, text_color)
+            text_rect = plus_text.get_rect(center=self.button_speed_up.center)
+            self.window.blit(plus_text, text_rect)
+
+        if self.button_speed_down:
+            pygame.draw.rect(self.window, button_color, self.button_speed_down)
+            pygame.draw.rect(self.window, highlight_color, self.button_speed_down, 2)
+            minus_text = self.font.render("- Speed", True, text_color)
+            text_rect = minus_text.get_rect(center=self.button_speed_down.center)
+            self.window.blit(minus_text, text_rect)
+
+        info_text = self.font.render(f"Target: {self.render_fps} FPS  Actual: {self.display_fps:.1f} FPS", True, text_color)
+        self.window.blit(info_text, (10, 50))
+
+    def _increase_speed(self) -> None:
+        self.render_fps = min(self.render_fps * 2, 240)
+
+    def _decrease_speed(self) -> None:
+        self.render_fps = max(self.render_fps // 2, 5)
 
 
 if __name__ == "__main__":

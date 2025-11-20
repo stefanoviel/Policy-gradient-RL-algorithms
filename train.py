@@ -6,14 +6,14 @@ from typing import Callable, Optional
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor
 
 from snake import SnakeEnv
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train a PPO agent on the SnakeEnv.")
-    parser.add_argument("--timesteps", type=int, default=200_000, help="Total training timesteps.")
+    parser.add_argument("--timesteps", type=int, default=1_500_000, help="Total training timesteps.")
     parser.add_argument("--num-envs", type=int, default=4, help="Number of parallel environments.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility.")
     parser.add_argument("--log-dir", type=str, default="runs/ppo_snake", help="TensorBoard log directory.")
@@ -39,6 +39,7 @@ def main():
 
     env_fns = [make_env(args.seed + i if args.seed is not None else None) for i in range(args.num_envs)]
     vec_env = DummyVecEnv(env_fns)
+    vec_env = VecMonitor(vec_env)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_name = f"ppo_snake_{timestamp}"
