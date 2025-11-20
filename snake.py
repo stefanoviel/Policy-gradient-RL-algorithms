@@ -11,6 +11,8 @@ GRID_HEIGHT = 24
 SCREEN_WIDTH = CELL_SIZE * GRID_WIDTH
 SCREEN_HEIGHT = CELL_SIZE * GRID_HEIGHT
 SNAKE_SPEED = 10
+MIN_SPEED = 5
+MAX_SPEED = 30
 
 BACKGROUND = (30, 30, 30)
 SNAKE_COLOR = (0, 200, 0)
@@ -49,6 +51,7 @@ def main() -> None:
         return snake, direction, direction, food, 0
 
     snake, direction, pending_direction, food, score = reset_game()
+    speed = SNAKE_SPEED
     game_over = False
 
     while True:
@@ -79,7 +82,14 @@ def main() -> None:
 
                 if event.key == pygame.K_r and game_over:
                     snake, direction, pending_direction, food, score = reset_game()
+                    speed = SNAKE_SPEED
                     game_over = False
+
+                if event.key in (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_KP_PLUS):
+                    speed = min(MAX_SPEED, speed + 1)
+
+                if event.key in (pygame.K_MINUS, pygame.K_UNDERSCORE, pygame.K_KP_MINUS):
+                    speed = max(MIN_SPEED, speed - 1)
 
         if not game_over:
             direction = pending_direction
@@ -111,7 +121,7 @@ def main() -> None:
             screen.blit(text, text_rect)
 
         pygame.display.flip()
-        clock.tick(SNAKE_SPEED)
+        clock.tick(speed)
 
 
 if __name__ == "__main__":
