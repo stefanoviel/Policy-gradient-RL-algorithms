@@ -69,10 +69,13 @@ class SnakeEnv(gym.Env):
 
     def step(self, action: int):
         action = int(action)
-        assert self.action_space.contains(action), "Action must be 0 (straight), 1 (right), or 2 (left)"
+        assert self.action_space.contains(action)
 
         self.direction = self._direction_after_action(action)
         new_head = (self.snake[0][0] + self.direction[0], self.snake[0][1] + self.direction[1])
+        
+        current_dist = np.linalg.norm(np.array(self.snake[0]) - np.array(self.food))
+        new_dist = np.linalg.norm(np.array(new_head) - np.array(self.food))
 
         reward = 0.0
         terminated = False
@@ -82,6 +85,12 @@ class SnakeEnv(gym.Env):
             terminated = True
         else:
             self.snake.insert(0, new_head)
+            
+            if new_dist < current_dist:
+                reward += 0.1
+            else:
+                reward -= 0.1
+
             if new_head == self.food:
                 reward = 10.0
                 self.score += 1
@@ -90,13 +99,14 @@ class SnakeEnv(gym.Env):
             else:
                 self.snake.pop()
                 self.steps_since_food += 1
+                
+        reward -= 0.01
 
         observation = self._get_state()
         info = {"score": self.score}
         truncated = False
 
         return observation, reward, terminated, truncated, info
-
     def render(self):
         if self.render_mode != "human":
             return
