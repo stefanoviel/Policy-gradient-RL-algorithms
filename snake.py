@@ -2,25 +2,15 @@ import random
 from typing import List, Optional, Tuple
 
 import numpy as np
-
-try:
-    import gymnasium as gym
-    from gymnasium import spaces
-except ImportError:  # pragma: no cover - fallback for classic gym installs
-    import gym
-    from gym import spaces
-
-try:
-    import pygame
-except ImportError:  # pragma: no cover - pygame is optional for rendering
-    pygame = None
+import gymnasium as gym
+from gymnasium import spaces
+import pygame
 
 
 Vector = Tuple[int, int]
 
 
 class SnakeEnv(gym.Env):
-    """Gym-style environment for the classic Snake game with a vector state space."""
 
     metadata = {"render_modes": ["human"], "render_fps": 15}
 
@@ -37,8 +27,13 @@ class SnakeEnv(gym.Env):
         self.render_mode = render_mode
         self.cell_size = 20
 
-        self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(11,), dtype=np.float32)
-        self.action_space = spaces.Discrete(3)  # straight, right turn, left turn
+        self.observation_space = spaces.Box(
+            low=0, 
+            high=3, 
+            shape=(self.grid_height, self.grid_width), 
+            dtype=np.uint8
+        )
+        self.action_space = spaces.Discrete(3)
 
         self.snake: List[Vector] = []
         self.direction: Vector = self.RIGHT
@@ -78,11 +73,8 @@ class SnakeEnv(gym.Env):
 
         self.direction = self._direction_after_action(action)
         new_head = (self.snake[0][0] + self.direction[0], self.snake[0][1] + self.direction[1])
-        
-        current_dist = np.linalg.norm(np.array(self.snake[0]) - np.array(self.food))
-        new_dist = np.linalg.norm(np.array(new_head) - np.array(self.food))
 
-        reward = 0.0
+        reward = -0.01
         terminated = False
 
         if self._is_collision(new_head):
@@ -90,12 +82,6 @@ class SnakeEnv(gym.Env):
             terminated = True
         else:
             self.snake.insert(0, new_head)
-            
-            if new_dist < current_dist:
-                reward += 0.1
-            else:
-                reward -= 0.1
-
             if new_head == self.food:
                 reward = 10.0
                 self.score += 1
@@ -104,14 +90,18 @@ class SnakeEnv(gym.Env):
             else:
                 self.snake.pop()
                 self.steps_since_food += 1
-                
-        reward -= 0.01
+
+        starvation_limit = (self.grid_width * self.grid_height) // 2
+        if not terminated and self.steps_since_food > starvation_limit:
+            terminated = True
+            reward -= 10.0
 
         observation = self._get_state()
         info = {"score": self.score, "length": len(self.snake)}
         truncated = False
 
         return observation, reward, terminated, truncated, info
+
     def render(self):
         if self.render_mode != "human":
             return
@@ -169,9 +159,9 @@ class SnakeEnv(gym.Env):
 
     def _direction_after_action(self, action: int) -> Vector:
         idx = self.DIRECTIONS.index(self.direction)
-        if action == 1:  # right turn
+        if action == 1:
             idx = (idx + 1) % 4
-        elif action == 2:  # left turn
+        elif action == 2:
             idx = (idx - 1) % 4
         return self.DIRECTIONS[idx]
 
@@ -188,32 +178,18 @@ class SnakeEnv(gym.Env):
         return random.choice(available)
 
     def _get_state(self) -> np.ndarray:
-        head_x, head_y = self.snake[0]
-        dir_idx = self.DIRECTIONS.index(self.direction)
-        dir_left = self.DIRECTIONS[(dir_idx - 1) % 4]
-        dir_right = self.DIRECTIONS[(dir_idx + 1) % 4]
-
-        danger_straight = self._is_collision((head_x + self.direction[0], head_y + self.direction[1]))
-        danger_right = self._is_collision((head_x + dir_right[0], head_y + dir_right[1]))
-        danger_left = self._is_collision((head_x + dir_left[0], head_y + dir_left[1]))
-
-        state = np.array(
-            [
-                float(danger_straight),
-                float(danger_right),
-                float(danger_left),
-                float(self.direction == self.LEFT),
-                float(self.direction == self.RIGHT),
-                float(self.direction == self.UP),
-                float(self.direction == self.DOWN),
-                float(self.food[0] < head_x),
-                float(self.food[0] > head_x),
-                float(self.food[1] < head_y),
-                float(self.food[1] > head_y),
-            ],
-            dtype=np.float32,
-        )
-        return state
+        board = np.zeros((self.grid_height, self.grid_width), dtype=np.uint8)
+        
+        for i, (x, y) in enumerate(self.snake):
+            if i == 0:
+                board[y, x] = 2
+            else:
+                board[y, x] = 1
+        
+        fx, fy = self.food
+        board[fy, fx] = 3
+        
+        return board
 
     def _draw_block(self, position: Vector, color: Tuple[int, int, int]) -> None:
         if self.window is None or pygame is None:
