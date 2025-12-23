@@ -1,3 +1,4 @@
+import os
 import datetime
 import torch
 import torch.nn as nn
@@ -29,6 +30,8 @@ def train(num_epochs = 1000):
     batch_size = 5
     batch_losses = []
     current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    if not os.path.exists('runs'):
+        os.makedirs('runs')
     log_dir = f'runs/reinforce_{current_time}'
     writer = SummaryWriter(log_dir)
 
@@ -38,6 +41,7 @@ def train(num_epochs = 1000):
         log_probs = []
         ep_reward = []
         
+        # use policy to generate trajectory
         while True: 
             action_prob = policy(torch.tensor(state))
             dist = Categorical(action_prob)
@@ -52,15 +56,18 @@ def train(num_epochs = 1000):
             if terminated or truncated: 
                 break
         
+        # Compute discounted returns
         returns = []
         G = 0
         for r in reversed(ep_reward): 
             G = r + G * gamma
             returns.insert(0, G)
 
+        # Normalize returns to reduce variance
         tensor_return = torch.tensor(returns)
         return_normalized = (tensor_return - tensor_return.mean()) / (tensor_return.std() + 1e-7)
         
+        # Compute policy gradient loss
         ep_loss = 0
         for rew, log_prob in zip(return_normalized, log_probs):
             ep_loss += -log_prob * rew
@@ -71,6 +78,7 @@ def train(num_epochs = 1000):
         writer.add_scalar('train/ep_loss', ep_loss/len(returns), epoch)
         writer.add_scalar('train/ep_length', len(returns), epoch)
 
+        # Update policy after batch_size episodes
         if epoch % batch_size == 0 and batch_size != 0: 
             optimizer.zero_grad()
             loss = sum(batch_losses)/len(batch_losses)
